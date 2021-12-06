@@ -6,6 +6,7 @@ import time
 import jwt
 import grpc
 
+from prettytable import PrettyTable
 import tempfile
 import os
 from kubernetes import client, config
@@ -72,7 +73,7 @@ def get_k8s_api(endpoint, certificate, iam_token):
     aConfiguration.ssl_ca_cert = nameFileCert
     aConfiguration.api_key = {"authorization": "Bearer " + iam_token}
     aApiClient = client.ApiClient(aConfiguration)
-    v1 = client.CoreV1Api(aApiClient)
+    v1 = client.AppsV1Api(aApiClient)
     return v1
 
 def main():
@@ -86,18 +87,22 @@ def main():
     operation = list_folder(sdk, arguments.cloud_id)
 
     for folder in operation:
-        print(folder.name + ":")
-        listClusters = list_cluster_k8s(sdk, folder.id)
-        for cluster in listClusters:
-            print("  " + cluster.name)
-            print("    internal endpoint: " + cluster.master.endpoints.internal_v4_endpoint)
-            v1 = get_k8s_api(cluster.master.endpoints.internal_v4_endpoint, cluster.master.master_auth.cluster_ca_certificate, k8sToken.iam_token)
-            print("Listing pods with their IPs:")
-            ret = v1.list_pod_for_all_namespaces(watch=False)
-            for i in ret.items:
-                print("%s\t%s\t%s" % (i.status.pod_ip, i.metadata.namespace, i.metadata.name))
-            print("")
-
+        if arguments.filter_folder in folder.name:
+            print(folder.name + ":")
+            listClusters = list_cluster_k8s(sdk, folder.id)
+            for cluster in listClusters:
+                print("  " + cluster.name)
+                print("    internal endpoint: " + cluster.master.endpoints.internal_v4_endpoint)
+                v1 = get_k8s_api(cluster.master.endpoints.internal_v4_endpoint, cluster.master.master_auth.cluster_ca_certificate, k8sToken.iam_token)
+                print("Listing deployments:")
+                ret = v1.list_deployment_for_all_namespaces(watch=False)
+                t = PrettyTable(['Name', 'Namespace'])
+                t.align['Name'] = "l"
+                t.align['Namespace'] = "c"
+                for i in ret.items:
+                    t.add_row([i.metadata.name, i.metadata.namespace])
+                print(t)
+                print("")
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -110,6 +115,7 @@ def parse_args():
              'yc iam key create --output sa.json --service-account-id <id>', required=True
     )
     parser.add_argument('--cloud-id', help='Your Yandex.Cloud cloud id', required=True)
+    parser.add_argument('--filter-folder', help='Substring in Folder name', default='')
 
     return parser.parse_args()
 
